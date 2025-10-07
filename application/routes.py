@@ -4,6 +4,25 @@ from flask import current_app as app
 from datetime import datetime, date
 from .models import *
 
+
+#ACTIVE CAMPAIGNS
+def campaign_isactive(start_date, end_date, present_date):
+    present_date = date.today()
+    return start_date <= present_date < end_date
+
+
+#PROGRESS CALCULATION
+def calculate_campaign_progress(start_date, end_date):
+    current_date = date.today()
+    total_days = (end_date - start_date).days
+    elapsed_days = (current_date - start_date).days
+    if total_days > 0:
+        progress = (elapsed_days / total_days) * 100
+    else:
+        progress = 0
+    return round(progress, 2)
+
+
 #HOME PAGE
 @app.route('/')
 @app.route('/home')
@@ -81,8 +100,87 @@ def sponsor_login():
                         this_sponsor = sponsor
                         login_user(this_sponsor)
 
+                        adrequests = db.session.query(Adrequests).join(Campaign).join(Influencer).filter(
+                            Campaign.sponsor_id == sponsor.sponsor_id,
+                            Campaign.flagged == 0,
+                            Influencer.flagged == 0,
+                            Adrequests.status.in_(["Requested to Sponsor", "Accepted by Sponsor"])
+                        ).all()
+
+                        campaigns = Campaign.query.filter_by(sponsor_id = sponsor.sponsor_id, flagged = 0).all()
+
+                        active_campaigns = []
+
+                        for campaign in campaigns:
+                            if(campaign_isactive(campaign.start_date, campaign.end_date, date.today())):
+                                active_campaigns.append(campaign)
+
 
         #add features of dashboard
 
-        return render_template('sponsor_dashboard.html', current_user=this_sponsor, u_name=u_name)
+        return render_template('sponsor_dashboard.html', current_user=this_sponsor, u_name=u_name, adrequests=adrequests, campaigns=active_campaigns, id=User.id, calculate_campaign_progress=calculate_campaign_progress)
     return render_template('sponsor_login.html')
+
+
+#SPONSOR LOGOUT
+@app.route('/sponsor_logout')
+@login_required
+def sponsor_logout():
+    logout_user()
+    return render_template('sponsor_login.html')
+
+
+#SPONSOR DASHBOARD
+@app.route('/sponsor_dash', methods=['GET', 'POST'])
+@login_required
+def sponsor_dash():
+    user_id = current_user.id
+    user = User.query.filter_by(id=user_id).first()
+    sponsor = Sponsor.query.filter_by(sponsor_id=user.id).first()
+
+    adrequests = db.session.query(Adrequests).join(Campaign).join(Influencer).filter(
+        Campaign.sponsor_id == current_user.id,
+        Campaign.flagged == 0,
+        Influencer.flagged == 0,
+        Adrequests.status.in_(["Requested to Sponsor", "Accepted by Sponsor"])
+    ).all()
+
+    campaigns = Campaign.query.filter_by(sponsor_id = current_user.id, flagged = 0).all()
+
+    active_campaigns = []
+
+    for campaign in campaigns:
+        if(campaign_isactive(campaign.start_date, campaign.end_date, date.today())):
+            active_campaigns.append(campaign)
+    
+    return render_template('sponsor_dashboard.html', adrequests=adrequests, u_name=current_user.username, id=User.id, campaigns=active_campaigns, calculate_campaign_progress=calculate_campaign_progress)
+
+#SPONSOR CREATE CAMPAIGN
+@app.route('/create_campaign', methods=['GET', 'POST'])
+@login_required
+def create_campaign():
+    if request.method == 'POST':
+        name = request.form.get("name")
+        desc = request.form.get("desc")
+        budget = int(request.form.get("budget"))
+        if budget <=0:
+            return render_template('create_campaign.html', message="Budget must be greater than 0")
+        niche = request.form.get("niche")
+        sdate = request.form.get("sdate")
+        sdate = datetime.strptime(sdate, '%Y-%m-%d').date()
+        edate = request.form.get("edate")
+        edate = datetime.strptime(edate, '%Y-%m-%d').date()
+        current_date = date.today()
+        if edate < sdate:
+            return render_template('create_campaign.html', message="End date must be after start date")
+        if edate < current_date:
+            return render_template('create_campaign.html', message="End date must be in the future")
+        visibility = request.form.get("visibility").lower()
+        goals = request.form.get("goals")
+        this_id = current_user.id
+        sponsor = Sponsor.query.filter_by(sponsor_id=this_id).first()
+        new_campaign = Campaign(name=name, description=desc, campaign_budget=budget, start_date=sdate, end_date=edate, visibility=visibility, goals=goals, niche=niche, sponsor_id=current_user.id)
+        db.session.add(new_campaign)
+        db.session.commit()
+        return redirect('/sponsor_campaign')
+    return render_template('create_campaign.html')
