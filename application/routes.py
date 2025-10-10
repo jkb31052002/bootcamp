@@ -184,3 +184,77 @@ def create_campaign():
         db.session.commit()
         return redirect('/sponsor_campaign')
     return render_template('create_campaign.html')
+
+
+#SPONSOR EDIT CAMPAIGN
+@app.route('/edit_campaign/<int:campaign_id>', methods=['GET', 'POST'])
+@login_required
+def edit_campaign(campaign_id):
+    campaign = Campaign.query.get(campaign_id)
+    if request.method == 'POST':
+        name = request.form.get("name")
+        desc = request.form.get("desc")
+        budget = int(request.form.get("budget"))
+        if budget <=0:
+            return render_template('create_campaign.html', message="Budget must be greater than 0")
+        niche = request.form.get("niche")
+        sdate = request.form.get("sdate")
+        sdate = datetime.strptime(sdate, '%Y-%m-%d').date()
+        edate = request.form.get("edate")
+        edate = datetime.strptime(edate, '%Y-%m-%d').date()
+        current_date = date.today()
+        if edate < sdate:
+            return render_template('create_campaign.html', message="End date must be after start date")
+        if edate < current_date:
+            return render_template('create_campaign.html', message="End date must be in the future")
+        visibility = request.form.get("visibility").lower()
+        goals = request.form.get("goals")
+
+
+        campaign.name = name
+        campaign.description = desc
+        campaign.campaign_budget = budget
+        campaign.start_date = sdate
+        campaign.end_date = edate
+        campaign.visibility = visibility
+        campaign.goals = goals
+        campaign.niche = niche
+
+        db.session.commit()
+        return redirect('/sponsor_campaign')
+    return render_template('edit_campaign.html', campaign=campaign)
+
+
+#SPONSOR DELETE CAMPAIGN
+@app.route('/delete_campaign/<int:campaign_id>', methods=['GET', 'POST'])
+@login_required
+def delete_campaign(campaign_id):
+    campaign = Campaign.query.get(campaign_id)
+    if campaign:
+        db.session.delete(campaign)
+        db.session.commit()
+    return redirect(url_for('sponsor_campaign'))
+
+
+#SPONSOR VIEW CAMPAIGNS
+@app.route('/view_campaign/<int:campaign_id>', methods=['GET', 'POST'])
+@login_required
+def view_campaign(campaign_id):
+    campaign = Campaign.query.get(campaign_id)
+    adrequests = db.session.query(Adrequests).join(Influencer).filter(
+        Adrequests.campaign_id == campaign.id,
+        Adrequests.sent_by_sponsor == True,
+        Influencer.flagged == 0,
+    ).all()
+    progress = calculate_campaign_progress(campaign.start_date, campaign.end_date)
+    return render_template('view_campaign.html', campaign=campaign, adrequests=adrequests, progress=progress)
+
+#SPONSOR CAMPAIGNS PAGE
+@app.route('/sponsor_campaign', methods=['GET', 'POST'])
+@login_required
+def sponsor_campaign():
+    this_id = current_user.id
+    sponsor = Sponsor.query.filter_by(sponsor_id=this_id).first()
+
+    campaigns = Campaign.query.filter_by(sponsor_id=current_user.id, flagged=0).all()
+    return render_template('sponsor_campaign.html', campaigns=campaigns, sponsor=sponsor, calculate_campaign_progress=calculate_campaign_progress)
